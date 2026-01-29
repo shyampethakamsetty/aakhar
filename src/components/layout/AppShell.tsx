@@ -13,15 +13,14 @@ export function AppShell() {
         items: [
           { label: 'Dashboard', icon: '📊', to: '/dashboard' },
           { label: 'All Projects', icon: '📁', to: '/projects' },
+          { label: 'Schedule & Timeline', icon: '📅', to: '/schedule' },
         ],
       },
       {
         title: 'Project Management',
         items: [
-          { label: 'General Information', icon: 'ℹ️', to: '/general' },
           { label: 'Client Details', icon: '👥', to: '/client' },
           { label: 'Commercial', icon: '💰', to: '/commercial' },
-          { label: 'Schedule & Timeline', icon: '📅', to: '/schedule' },
         ],
       },
       {
@@ -37,6 +36,7 @@ export function AppShell() {
         items: [
           { label: 'Reports', icon: '📈', to: '/reports' },
           { label: 'Analytics', icon: '📊', to: '/analytics' },
+          { label: 'Analysis', icon: '📉', to: '/analysis' },
         ],
       },
     ],

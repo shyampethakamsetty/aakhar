@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { projectService } from '../data/projectData'
 import type { Project } from '../types/project'
+import { exportProjectToPDF } from '../utils/pdfExport'
 
 // Helper for table rows
 const DetailRow = ({
@@ -84,7 +85,16 @@ export function ProjectDetails() {
 
     return (
         <div className="content">
-            <div className="breadcrumb">
+            <div className="breadcrumb" style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => navigate(-1)}
+                    style={{ padding: '6px 12px', fontSize: '13px', marginRight: '4px' }}
+                >
+                    ← Back
+                </button>
+                <span style={{ color: 'var(--text-secondary)' }}>|</span>
                 <a href="#" onClick={(e) => { e.preventDefault(); navigate('/'); }}>Home</a> /
                 <a href="#" onClick={(e) => { e.preventDefault(); navigate('/projects'); }}>Projects</a> /
                 <span>{isNew ? 'New Project' : project.jan}</span>
@@ -105,7 +115,10 @@ export function ProjectDetails() {
                                 <button className="btn btn-primary" onClick={handleSave}>{isNew ? 'Create Project' : 'Save Changes'}</button>
                             </div>
                         ) : (
-                            <button className="btn btn-primary" onClick={() => setIsEditing(true)}>✏️ Edit Project</button>
+                            <div className="section-actions">
+                                <button className="btn btn-secondary" onClick={() => exportProjectToPDF(project)}>📥 Export PDF</button>
+                                <button className="btn btn-primary" onClick={() => setIsEditing(true)}>✏️ Edit Project</button>
+                            </div>
                         )}
                     </div>
                 </div>

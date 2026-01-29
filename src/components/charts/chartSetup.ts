@@ -7,6 +7,8 @@ import {
   Title,
   Tooltip,
   Legend,
+  PointElement,
+  LineElement,
 } from 'chart.js'
 
 let registered = false
@@ -21,6 +23,8 @@ export function ensureChartsRegistered() {
     Title,
     Tooltip,
     Legend,
+    PointElement,
+    LineElement,
   )
   registered = true
 }

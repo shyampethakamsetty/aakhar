@@ -5,12 +5,12 @@ import { ProjectDetails } from './pages/ProjectDetails.tsx'
 import { ClientDetails } from './pages/ClientDetails.tsx'
 import { Commercial } from './pages/Commercial.tsx'
 import { Documents } from './pages/Documents.tsx'
-import { GeneralInformation } from './pages/GeneralInformation.tsx'
 import { HrCompliance } from './pages/HrCompliance.tsx'
 import { Projects } from './pages/Projects.tsx'
-import { ScheduleTimeline } from './pages/ScheduleTimeline.tsx'
 import { Subcontractors } from './pages/Subcontractors.tsx'
 import { PlaceholderPage } from './pages/PlaceholderPage.tsx'
+import { Alerts } from './pages/Alerts.tsx'
+import { ProjectsWithValueIncrease } from './pages/ProjectsWithValueIncrease.tsx'
 
 export function AppRouter() {
   return (
@@ -18,18 +18,20 @@ export function AppRouter() {
       <Route element={<AppShell />}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/alerts" element={<Alerts />} />
         <Route path="/projects" element={<Projects />} />
         <Route path="/projects/new" element={<ProjectDetails />} />
         <Route path="/projects/:projectId" element={<ProjectDetails />} />
-        <Route path="/general" element={<GeneralInformation />} />
         <Route path="/client" element={<ClientDetails />} />
         <Route path="/commercial" element={<Commercial />} />
-        <Route path="/schedule" element={<ScheduleTimeline />} />
+        <Route path="/value-increase" element={<ProjectsWithValueIncrease />} />
+        <Route path="/schedule" element={<Alerts />} />
         <Route path="/hr" element={<HrCompliance />} />
         <Route path="/documents" element={<Documents />} />
         <Route path="/subcontractors" element={<Subcontractors />} />
         <Route path="/reports" element={<PlaceholderPage title="Reports" />} />
         <Route path="/analytics" element={<PlaceholderPage title="Analytics" />} />
+        <Route path="/analysis" element={<PlaceholderPage title="Analysis" />} />
         <Route path="*" element={<PlaceholderPage title="Not Found" />} />
       </Route>
     </Routes>

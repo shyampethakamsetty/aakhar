@@ -309,6 +309,10 @@ body {
   background: var(--danger-color);
 }
 
+.stat-card.orange::before {
+  background: #f97316;
+}
+
 .stat-header {
   display: flex;
   justify-content: space-between;
@@ -350,6 +354,11 @@ body {
 .stat-card.red .stat-icon {
   background: rgba(239, 68, 68, 0.1);
   color: var(--danger-color);
+}
+
+.stat-card.orange .stat-icon {
+  background: rgba(249, 115, 22, 0.1);
+  color: #f97316;
 }
 
 .stat-value {
