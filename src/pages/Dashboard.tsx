@@ -185,7 +185,7 @@ export function Dashboard() {
     }
   }, [])
 
-  // Critical Alerts & Notifications
+  // Critical Alerts & Notifications (used for future Alerts UI)
   const alerts = useMemo(() => {
     const projects = projectService.getAllProjects()
     const alertList: Alert[] = []
@@ -370,6 +370,7 @@ export function Dashboard() {
       return aDays - bDays
     })
   }, [])
+  void alerts // reserved for Alerts UI
 
   return (
     <div className="content">

@@ -51,7 +51,6 @@ export function Documents() {
     ? clientsWithDocs.find((c) => c.name === selectedClient) ?? null
     : null
 
-  const totalProjectsWithLinks = clientsWithDocs.reduce((sum, c) => sum + c.projects.length, 0)
 
   const filteredClientsWithDocs = useMemo(() => {
     if (!searchQuery.trim()) return clientsWithDocs

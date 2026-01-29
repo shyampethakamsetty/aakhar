@@ -2,7 +2,6 @@ import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { projectService } from '../data/projectData'
 import { exportProjectsToPDF } from '../utils/pdfExport'
-import type { Project } from '../types/project'
 
 const formatCurrency = (value: number): string => {
   if (value === 0 || !value) return '₹0'

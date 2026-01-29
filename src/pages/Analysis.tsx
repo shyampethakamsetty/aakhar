@@ -223,7 +223,8 @@ export function Analysis() {
       legend: { position: 'bottom' as const },
       tooltip: {
         callbacks: {
-          label: (ctx: { raw: number }) => `₹ ${ctx.raw.toFixed(2)} Cr`,
+          label: (tooltipItem: { raw?: unknown }) =>
+            `₹ ${Number(tooltipItem.raw ?? 0).toFixed(2)} Cr`,
         },
       },
     },
@@ -231,7 +232,7 @@ export function Analysis() {
       y: {
         beginAtZero: true,
         ticks: {
-          callback: (value: number) => `₹ ${value} Cr`,
+          callback: (tickValue: string | number) => `₹ ${Number(tickValue)} Cr`,
         },
       },
     },
@@ -397,7 +398,7 @@ export function Analysis() {
                 scales: {
                   ...chartOptions.scales,
                   x: { stacked: false },
-                  y: { stacked: false, beginAtZero: true, ticks: { callback: (v: number) => `₹ ${v} Cr` } },
+                  y: { stacked: false, beginAtZero: true, ticks: { callback: (v: string | number) => `₹ ${Number(v)} Cr` } },
                 },
               }}
             />
