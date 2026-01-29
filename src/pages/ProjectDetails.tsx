@@ -43,25 +43,39 @@ export function ProjectDetails() {
     const [project, setProject] = useState<Project | null>(null)
     const [isEditing, setIsEditing] = useState(false)
     const [formData, setFormData] = useState<Project | null>(null)
+    const isNew = !projectId || projectId === 'new' // Check if creating new
 
     useEffect(() => {
-        if (projectId) {
+        if (isNew) {
+            // Initialize empty project
+            const empty = projectService.getEmptyProject()
+            setProject(empty)
+            setFormData(empty)
+            setIsEditing(true) // Default to edit mode for new projects
+        } else if (projectId) {
             const p = projectService.getProjectByJan(parseInt(projectId))
             if (p) {
                 setProject(p)
                 setFormData(p)
             }
         }
-    }, [projectId])
+    }, [projectId, isNew])
 
     if (!project || !formData) {
         return <div className="content">Loading...</div>
     }
 
     const handleSave = () => {
-        setProject(formData)
-        setIsEditing(false)
-        alert('Changes saved to local view')
+        // In a real app, validation and API call would happen here
+        if (isNew) {
+            alert('New Project Created! (Stored in local state only for demo)')
+            // Could redirect to the list or staying
+            navigate('/projects')
+        } else {
+            setProject(formData)
+            setIsEditing(false)
+            alert('Changes saved to local view')
+        }
     }
 
     const updateField = (updater: (prev: Project) => Project) => {
@@ -73,20 +87,22 @@ export function ProjectDetails() {
             <div className="breadcrumb">
                 <a href="#" onClick={(e) => { e.preventDefault(); navigate('/'); }}>Home</a> /
                 <a href="#" onClick={(e) => { e.preventDefault(); navigate('/projects'); }}>Projects</a> /
-                <span>{project.jan}</span>
+                <span>{isNew ? 'New Project' : project.jan}</span>
             </div>
 
             <div className="page-header">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
                     <div>
-                        <h1 className="page-title">{project.workName}</h1>
-                        <p className="page-subtitle">JAN: {project.jan} | <span style={{ color: 'var(--primary-color)' }}>{project.clientName}</span> | {project.location.city}</p>
+                        <h1 className="page-title">{isNew ? 'Create New Project' : project.workName}</h1>
+                        {!isNew && (
+                            <p className="page-subtitle">JAN: {project.jan} | <span style={{ color: 'var(--primary-color)' }}>{project.clientName}</span> | {project.location.city}</p>
+                        )}
                     </div>
                     <div>
                         {isEditing ? (
                             <div className="section-actions">
-                                <button className="btn btn-secondary" onClick={() => setIsEditing(false)}>Cancel</button>
-                                <button className="btn btn-primary" onClick={handleSave}>Save Changes</button>
+                                <button className="btn btn-secondary" onClick={() => isNew ? navigate('/projects') : setIsEditing(false)}>Cancel</button>
+                                <button className="btn btn-primary" onClick={handleSave}>{isNew ? 'Create Project' : 'Save Changes'}</button>
                             </div>
                         ) : (
                             <button className="btn btn-primary" onClick={() => setIsEditing(true)}>✏️ Edit Project</button>
@@ -96,22 +112,39 @@ export function ProjectDetails() {
             </div>
 
             <div className="section-grid-2">
-                {/* Tender & General Details */}
+                {/* Project Overview */}
                 <div className="section">
                     <div className="section-header">
-                        <div className="section-title">📜 Tender Details</div>
+                        <div className="section-title">ℹ️ Project Overview</div>
                     </div>
                     <div className="section-content" style={{ padding: 0 }}>
                         <table className="details-table">
                             <tbody>
-                                <DetailRow label="JAN" value={formData.jan} isEditing={false} onChange={() => { }} />
-                                <DetailRow label="Tender Ref No." value={formData.dates.tinderDate} isEditing={isEditing} onChange={v => updateField(p => ({ ...p, dates: { ...p.dates, tinderDate: v } }))} />
+                                <DetailRow label="JAN" value={formData.jan} isEditing={isNew} onChange={v => updateField(p => ({ ...p, jan: parseInt(v) || 0 }))} />
                                 <DetailRow label="Current Status" value={formData.status} isEditing={isEditing} onChange={v => updateField(p => ({ ...p, status: v }))} />
                                 <DetailRow label="Financial Year" value={formData.financialYear} isEditing={isEditing} onChange={v => updateField(p => ({ ...p, financialYear: v }))} />
                                 <DetailRow label="State" value={formData.location.state} isEditing={isEditing} onChange={v => updateField(p => ({ ...p, location: { ...p.location, state: v } }))} />
                                 <DetailRow label="City / Place" value={formData.location.city} isEditing={isEditing} onChange={v => updateField(p => ({ ...p, location: { ...p.location, city: v } }))} />
+                                <DetailRow label="EIC (Internal)" value={formData.extra.eicName} isEditing={isEditing} onChange={v => updateField(p => ({ ...p, extra: { ...p.extra, eicName: v } }))} />
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                {/* Tender & EMD */}
+                <div className="section">
+                    <div className="section-header">
+                        <div className="section-title">📜 Tender & EMD</div>
+                    </div>
+                    <div className="section-content" style={{ padding: 0 }}>
+                        <table className="details-table">
+                            <tbody>
+                                <DetailRow label="Tender Ref No." value={formData.tender.referenceNo} isEditing={isEditing} onChange={v => updateField(p => ({ ...p, tender: { ...p.tender, referenceNo: v } }))} />
+                                <DetailRow label="Tender ID" value={formData.tender.tenderId} isEditing={isEditing} onChange={v => updateField(p => ({ ...p, tender: { ...p.tender, tenderId: v } }))} />
+                                <DetailRow label="Bank / UTR No" value={formData.tender.utrNumber} isEditing={isEditing} onChange={v => updateField(p => ({ ...p, tender: { ...p.tender, utrNumber: v } }))} />
                                 <DetailRow label="EMD Status" value={formData.compliance.emdStatus} isEditing={isEditing} onChange={v => updateField(p => ({ ...p, compliance: { ...p.compliance, emdStatus: v } }))} />
                                 <DetailRow label="EMD Payment" value={formData.compliance.emdPaymentStatus} isEditing={isEditing} onChange={v => updateField(p => ({ ...p, compliance: { ...p.compliance, emdPaymentStatus: v } }))} />
+                                <DetailRow label="PO/LOA Details" value={formData.extra.poDetails} isEditing={isEditing} onChange={v => updateField(p => ({ ...p, extra: { ...p.extra, poDetails: v } }))} />
                             </tbody>
                         </table>
                     </div>
@@ -194,20 +227,7 @@ export function ProjectDetails() {
                     </div>
                 </div>
 
-                {/* Additional Info */}
-                <div className="section">
-                    <div className="section-header">
-                        <div className="section-title">➕ Additional Details</div>
-                    </div>
-                    <div className="section-content" style={{ padding: 0 }}>
-                        <table className="details-table">
-                            <tbody>
-                                <DetailRow label="EIC Name" value={formData.extra.eicName} isEditing={isEditing} onChange={v => updateField(p => ({ ...p, extra: { ...p.extra, eicName: v } }))} />
-                                <DetailRow label="PO/WO Details" value={formData.extra.poDetails} isEditing={isEditing} onChange={v => updateField(p => ({ ...p, extra: { ...p.extra, poDetails: v } }))} />
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
+
             </div>
 
             {/* Subcontractor Section - Full Width */}

@@ -41,7 +41,11 @@ export function Projects() {
 
       <div className="page-header">
         <h1 className="page-title">All Projects ({filteredProjects.length})</h1>
-        <p className="page-subtitle">Manage and track all ongoing and completed projects</p>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button className="btn btn-primary" onClick={() => navigate('/projects/new')}>
+            ➕ New Project
+          </button>
+        </div>
       </div>
 
       <div className="section">

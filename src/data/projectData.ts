@@ -27,11 +27,19 @@ export const mapToProject = (raw: RawProjectData): Project => {
         status: parseString(raw['Current Status']),
         financialYear: parseString(raw['Financial Year']),
         dates: {
-            tinderDate: parseString(raw['Tender Ref. No. / NIT & Date']), // Note: This field often mixes Ref No and Date
+            tinderDate: parseString(raw['Tender Ref. No. / NIT & Date']),
             loaDate: parseString(raw['PO/WO/LOA Date']),
             startDate: parseString(raw['Work Start Date']),
             completionDateOriginal: parseString(raw['Completion Date as per LOA/PO']),
             completionDateLatest: parseString(raw['Latest Work Completion Date (as per Time Extension)']),
+        },
+        tender: {
+            referenceNo: parseString(raw['Tender Ref. No. / NIT & Date']).split('\n')
+                .find(l => !l.includes('Tender ID') && !l.includes('UTR') && !l.includes('Tender Reference Number') && l.trim().length > 5)?.trim() || '',
+            tenderId: parseString(raw['Tender Ref. No. / NIT & Date']).split('\n')
+                .find(l => l.includes('Tender ID'))?.replace('Tender ID', '').trim() || '',
+            utrNumber: parseString(raw['Tender Ref. No. / NIT & Date']).split('\n')
+                .find(l => l.includes('UTR'))?.split(':').pop()?.trim() || '',
         },
         contract: {
             valueInternal: parseNumber(raw['Contract Value Version as per LOI/NOA/LOA/DLOA/PO GST Extra']),
@@ -101,5 +109,45 @@ export const projectService = {
         const projects = projectService.getAllProjects()
         // Groupping logic could go here
         return projects
-    }
+    },
+
+    getEmptyProject: (): Project => ({
+        jan: 0,
+        clientName: '',
+        location: { state: '', city: '' },
+        workName: '',
+        status: 'Draft',
+        financialYear: '',
+        dates: {
+            tinderDate: '', loaDate: '', startDate: '',
+            completionDateOriginal: '', completionDateLatest: ''
+        },
+        tender: {
+            referenceNo: '', tenderId: '', utrNumber: ''
+        },
+        contract: {
+            valueInternal: 0, valueUpdated: 0, gstTerms: ''
+        },
+        clientContact: {
+            name: '', designation: '', mobile: '', email: '',
+            billingAddress: '', emailCC: ''
+        },
+        bankGuarantee: {
+            status: '', value: 0, expiryDate: '', claimDate: ''
+        },
+        compliance: {
+            emdStatus: '', emdPaymentStatus: '', hrClearance: '',
+            policyExpiry: '', laborLicense: '', pfEsicStatus: ''
+        },
+        extra: {
+            eicName: '', poDetails: '', completionDateFinal: ''
+        },
+        subcontractor: {
+            name: '', proprietor: '', mobile: '', email: '',
+            gstin: '', workOrderNo: '', workOrderDate: '', workOrderPercent: ''
+        },
+        documents: {
+            loaLink: '', agreementLink: '', subWorkOrderLink: ''
+        }
+    })
 }

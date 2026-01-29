@@ -63,6 +63,11 @@ export interface Project {
         completionDateOriginal: string
         completionDateLatest: string
     }
+    tender: {
+        referenceNo: string
+        tenderId: string
+        utrNumber: string
+    }
     contract: {
         valueInternal: number
         valueUpdated: number
