@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { projectService } from '../data/projectData'
 import { exportProjectsToPDF } from '../utils/pdfExport'
-import type { Project } from '../types/project'
+
 
 export function Projects() {
   const navigate = useNavigate()
@@ -250,8 +250,8 @@ export function Projects() {
                     <td style={{ padding: '14px 16px' }}>
                       <span
                         className={`status-badge ${p.status.toLowerCase().includes('ongoing') || p.status.toLowerCase().includes('progress')
-                            ? 'status-ongoing'
-                            : 'status-pending'
+                          ? 'status-ongoing'
+                          : 'status-pending'
                           }`}
                       >
                         {p.status.length > 24 ? p.status.substring(0, 24) + '...' : p.status}

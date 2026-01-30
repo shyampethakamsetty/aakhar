@@ -128,7 +128,7 @@ export function exportProjectToPDF(project: Project) {
   // Since jsPDF doesn't support gradients, we'll use a solid dark blue
   const headerColor = [47, 77, 123] // #2F4D7B - dark blue
   const headerHeight = 25
-  
+
   doc.setFillColor(headerColor[0], headerColor[1], headerColor[2])
   doc.rect(0, yPos, pageWidth, headerHeight, 'F')
   yPos = headerHeight
@@ -160,7 +160,7 @@ export function exportProjectToPDF(project: Project) {
   doc.setFontSize(9)
   doc.setTextColor(255, 255, 255)
   doc.text(`${dateStr}, ${timeStr}`, pageWidth - margin, 22, { align: 'right' })
-  
+
   // Reset text color
   doc.setTextColor(0, 0, 0)
   yPos += 8
@@ -177,13 +177,13 @@ export function exportProjectToPDF(project: Project) {
     const sectionHeaderHeight = 8
     doc.setFillColor(headerColor[0], headerColor[1], headerColor[2])
     doc.rect(margin, yPos, pageWidth - (margin * 2), sectionHeaderHeight, 'F')
-    
+
     // Section title - White, bold, left-aligned with padding
     doc.setFontSize(12)
     doc.setFont('helvetica', 'bold')
     doc.setTextColor(255, 255, 255)
     doc.text(title, margin + 3, yPos + 5.5)
-    
+
     // Reset text color
     doc.setTextColor(0, 0, 0)
     yPos += sectionHeaderHeight + 2
@@ -206,13 +206,13 @@ export function exportProjectToPDF(project: Project) {
         lineWidth: 0.5
       },
       columnStyles: {
-        0: { 
-          cellWidth: 75, 
+        0: {
+          cellWidth: 75,
           fontStyle: 'normal',
           textColor: [102, 102, 102], // #666666 - medium gray for labels
           fillColor: [255, 255, 255] // White background
         },
-        1: { 
+        1: {
           cellWidth: 100,
           textColor: [51, 51, 51], // #333333 - dark gray for values
           fillColor: [255, 255, 255] // White background
@@ -226,7 +226,11 @@ export function exportProjectToPDF(project: Project) {
       alternateRowStyles: {
         fillColor: [240, 240, 240] // #F0F0F0 - very light gray for alternating rows
       },
-      didParseCell: function(data: any) {
+      didParseCell: function (data: {
+        row: { index: number },
+        cell: { styles: { fillColor: any, textColor: any } },
+        column: { index: number }
+      }) {
         // Apply alternating row colors
         if (data.row.index % 2 === 1) {
           // Odd rows get light gray background
@@ -235,7 +239,7 @@ export function exportProjectToPDF(project: Project) {
           // Even rows get white background
           data.cell.styles.fillColor = [255, 255, 255] // White
         }
-        
+
         // Keep label column gray, value column dark
         if (data.column.index === 0) {
           data.cell.styles.textColor = [102, 102, 102] // Medium gray for labels
@@ -245,7 +249,8 @@ export function exportProjectToPDF(project: Project) {
       }
     })
 
-    yPos = (doc as any).lastAutoTable.finalY + 6
+    interface DocWithAutoTable extends jsPDF { lastAutoTable: { finalY: number } }
+    yPos = (doc as unknown as DocWithAutoTable).lastAutoTable.finalY + 6
   }
 
   // General Information - matching exact labels from sample PDF
@@ -336,18 +341,18 @@ export function exportProjectToPDF(project: Project) {
 
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i)
-    
+
     // Footer text - matching sample PDF
     doc.setFontSize(8)
     doc.setFont('helvetica', 'normal')
     doc.setTextColor(100, 100, 100)
-    
+
     // Document Generated date (left) - matching sample
     doc.text(`Document Generated: ${generatedDate}`, margin, pageHeight - 10)
-    
+
     // Confidential notice (center) - matching sample
     doc.text('Confidential - For Internal Use Only', pageWidth / 2, pageHeight - 10, { align: 'center' })
-    
+
     // Page number (right) - matching sample
     doc.text(`Page ${i} of ${pageCount}`, pageWidth - margin, pageHeight - 10, { align: 'right' })
   }
@@ -491,7 +496,8 @@ export function exportFinancialAnalysisToPDF(data: FinancialAnalysisData) {
       },
       margin: { left: margin, right: margin },
     })
-    yPos = (doc as any).lastAutoTable.finalY + 10
+    interface DocWithAutoTable extends jsPDF { lastAutoTable: { finalY: number } }
+    yPos = (doc as unknown as DocWithAutoTable).lastAutoTable.finalY + 10
   }
 
   const pageCount = doc.getNumberOfPages()

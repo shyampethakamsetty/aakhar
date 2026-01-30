@@ -41,26 +41,43 @@ const DetailRow = ({
 export function ProjectDetails() {
     const { projectId } = useParams()
     const navigate = useNavigate()
-    const [project, setProject] = useState<Project | null>(null)
-    const [isEditing, setIsEditing] = useState(false)
-    const [formData, setFormData] = useState<Project | null>(null)
+
     const isNew = !projectId || projectId === 'new' // Check if creating new
 
-    useEffect(() => {
+    const [project, setProject] = useState<Project | null>(() => {
         if (isNew) {
-            // Initialize empty project
-            const empty = projectService.getEmptyProject()
-            setProject(empty)
-            setFormData(empty)
-            setIsEditing(true) // Default to edit mode for new projects
+            return projectService.getEmptyProject()
         } else if (projectId) {
+            return projectService.getProjectByJan(parseInt(projectId)) || null
+        }
+        return null
+    })
+
+    const [formData, setFormData] = useState<Project | null>(() => {
+        if (isNew) {
+            return projectService.getEmptyProject()
+        } else if (projectId) {
+            return projectService.getProjectByJan(parseInt(projectId)) || null
+        }
+        return null
+    })
+
+    const [isEditing, setIsEditing] = useState(isNew)
+
+    useEffect(() => {
+        // If projectId changes (which is rare without unmount in this route, but possible),
+        // we might want to reload. However, the Router usually remounts.
+        // For now, we keep this empty to just handle updates if necessary, or remove it.
+        // Actually, let's keep it simple: if we navigated to a NEW project id, we should probably update.
+        if (!isNew && projectId && (!project || project.jan !== parseInt(projectId))) {
             const p = projectService.getProjectByJan(parseInt(projectId))
             if (p) {
                 setProject(p)
                 setFormData(p)
             }
         }
-    }, [projectId, isNew])
+    }, [projectId, isNew]) // Keep dependencies as before, but logic inside is safer
+
 
     if (!project || !formData) {
         return <div className="content">Loading...</div>

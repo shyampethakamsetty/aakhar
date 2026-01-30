@@ -22,7 +22,7 @@ export function FinancialYearChart({ data, chartType = 'bar' }: FinancialYearCha
   const labels = sortedData.map(d => d.year)
   const values = sortedData.map(d => d.value)
   const colors = [
-    '#667eea', '#764ba2', '#10b981', '#f59e0b', '#ef4444', 
+    '#667eea', '#764ba2', '#10b981', '#f59e0b', '#ef4444',
     '#3b82f6', '#f97316', '#8b5cf6', '#ec4899', '#14b8a6'
   ]
 
@@ -64,7 +64,7 @@ export function FinancialYearChart({ data, chartType = 'bar' }: FinancialYearCha
         titleFont: { size: 14 },
         bodyFont: { size: 13 },
         callbacks: {
-          label: (context: any) => {
+          label: (context: { dataIndex: number }) => {
             const index = context.dataIndex
             const item = sortedData[index]
             const valueInCr = (item.value / 10000000).toFixed(2)
@@ -80,8 +80,9 @@ export function FinancialYearChart({ data, chartType = 'bar' }: FinancialYearCha
       y: {
         beginAtZero: true,
         ticks: {
-          callback: function(value: any) {
-            return '₹' + (value / 10000000).toFixed(1) + ' Cr'
+          callback: function (value: number | string) {
+            const numVal = typeof value === 'string' ? parseFloat(value) : value
+            return '₹' + (numVal / 10000000).toFixed(1) + ' Cr'
           },
         },
       },
