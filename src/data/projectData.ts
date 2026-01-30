@@ -116,7 +116,7 @@ export const projectService = {
         clientName: '',
         location: { state: '', city: '' },
         workName: '',
-        status: 'Draft',
+        status: '',
         financialYear: '',
         dates: {
             tinderDate: '', loaDate: '', startDate: '',
