@@ -228,7 +228,7 @@ export function exportProjectToPDF(project: Project) {
       },
       didParseCell: function (data: {
         row: { index: number },
-        cell: { styles: { fillColor: any, textColor: any } },
+        cell: { styles: { fillColor: string | number | number[] | boolean, textColor: string | number | number[] | boolean } },
         column: { index: number }
       }) {
         // Apply alternating row colors
