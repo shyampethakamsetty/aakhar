@@ -21,15 +21,6 @@ const formatCurrency = (value: number): string => {
   }
 }
 
-// Helper function to format value in crores for display
-const formatInCrores = (value: number): string => {
-  if (!value || value === 0 || isNaN(value)) return '0.0'
-  const crores = Number(value) / 10000000
-  if (crores < 1) return crores.toFixed(2)
-  if (crores < 10) return (Math.floor(crores * 10) / 10).toFixed(1)
-  return Math.floor(crores).toFixed(0)
-}
-
 export function TotalValue() {
   const navigate = useNavigate()
   const allProjects = projectService.getAllProjects()

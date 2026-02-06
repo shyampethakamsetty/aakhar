@@ -24,7 +24,7 @@ export function exportProjectsToExcel(projects: Project[]) {
     ((project.contract.valueInternal || 0) / 10000000).toFixed(2),
     project.dates.startDate || '',
     project.dates.completionDateLatest || project.dates.completionDateOriginal || '',
-    project.eic || '',
+    project.extra?.eicName || '',
     project.financialYear || ''
   ])
 

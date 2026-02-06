@@ -20,27 +20,6 @@ const formatCurrency = (value: number): string => {
   }
 }
 
-// Helper function to format value in crores (for dashboard cards)
-// Formats like 91659595.56 to "9.1 Cr" with smart decimal places
-const formatInCrores = (value: number): string => {
-  if (!value || value === 0 || isNaN(value)) return '0.0'
-  const crores = Number(value) / 10000000
-  
-  // If less than 1 crore, show 2 decimal places
-  if (crores < 1) {
-    return crores.toFixed(2)
-  }
-  // If less than 10 crores, show 1 decimal place (use floor to round down)
-  else if (crores < 10) {
-    const rounded = Math.floor(crores * 10) / 10
-    return rounded.toFixed(1)
-  }
-  // If 10 or more crores, show 0 decimal places
-  else {
-    return Math.floor(crores).toFixed(0)
-  }
-}
-
 // Helper function to format percentage
 const formatPercent = (value: number): string => {
   return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
@@ -532,7 +511,7 @@ export function Dashboard() {
     const monthLabels = ['Jul 25', 'Aug 25', 'Sep 25', 'Oct 25', 'Nov 25', 'Dec 25', 'Jan 26']
     const monthlyData: { month: string; completed: number; started: number }[] = []
 
-    monthLabels.forEach((monthLabel, index) => {
+    monthLabels.forEach((monthLabel) => {
       // Calculate month/year from label (e.g., "Jul 25" -> July 2025)
       const year = monthLabel.includes('25') ? 2025 : 2026
       const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -616,7 +595,7 @@ export function Dashboard() {
   const uniqueManagers = useMemo(() => {
     const managers = new Set<string>()
     allProjectsForFilter.forEach(p => {
-      if (p.eic) managers.add(p.eic)
+      if (p.extra?.eicName) managers.add(p.extra.eicName)
     })
     return Array.from(managers).sort()
   }, [allProjectsForFilter])
@@ -646,7 +625,7 @@ export function Dashboard() {
 
     // Manager filter
     if (selectedManager !== 'all') {
-      filtered = filtered.filter(p => p.eic === selectedManager)
+      filtered = filtered.filter(p => p.extra?.eicName === selectedManager)
     }
 
     // Location filter
@@ -705,10 +684,6 @@ export function Dashboard() {
     setMinValue(0)
     setMaxValue(50)
     setCurrentPage(1)
-  }
-
-  const handleExportExcel = () => {
-    exportProjectsToExcel(filteredProjects)
   }
 
   const getStatusColor = (status: string) => {

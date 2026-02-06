@@ -1,7 +1,6 @@
 import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { projectService, normalizeProjectStatus } from '../data/projectData'
-import type { Project } from '../types/project'
 import { ProjectsByStatusChart } from '../components/charts/ProjectsByStatusChart'
 import { MonthlyProgressChart } from '../components/charts/MonthlyProgressChart'
 import { TopProjectsBarChart } from '../components/charts/TopProjectsBarChart'
@@ -14,16 +13,6 @@ function parseDate(dateStr: string): Date | null {
   }
   const date = new Date(dateStr)
   return isNaN(date.getTime()) ? null : date
-}
-
-// Helper function to check if date is overdue
-function isOverdue(date: Date | null): boolean {
-  if (!date) return false
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const targetDate = new Date(date)
-  targetDate.setHours(0, 0, 0, 0)
-  return targetDate < today
 }
 
 export function Reports() {
