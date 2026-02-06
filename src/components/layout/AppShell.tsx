@@ -19,6 +19,8 @@ export function AppShell() {
       {
         title: 'Project Management',
         items: [
+          { label: 'Add Project', icon: '➕', to: '/projects/new' },
+          { label: 'Add Client', icon: '➕', to: '/client/add' },
           { label: 'Client Details', icon: '👥', to: '/client' },
           { label: 'Commercial', icon: '💰', to: '/commercial' },
         ],
@@ -32,11 +34,9 @@ export function AppShell() {
         ],
       },
       {
-        title: 'Analytics',
+        title: 'Reports',
         items: [
           { label: 'Reports', icon: '📈', to: '/reports' },
-          { label: 'Analytics', icon: '📊', to: '/analytics' },
-          { label: 'Analysis', icon: '📉', to: '/analysis' },
         ],
       },
     ],

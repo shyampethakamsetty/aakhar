@@ -1,8 +1,12 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { projectService } from '../data/projectData'
+import { projectService, normalizeProjectStatus } from '../data/projectData'
 import type { Project } from '../types/project'
 import { FinancialYearChart } from '../components/charts/FinancialYearChart'
+import { ProjectsByStatusChart } from '../components/charts/ProjectsByStatusChart'
+import { MonthlyProgressChart } from '../components/charts/MonthlyProgressChart'
+import { TopProjectsBarChart } from '../components/charts/TopProjectsBarChart'
+import { exportProjectsToExcel } from '../utils/excelExport'
 
 // Helper function to format currency
 const formatCurrency = (value: number): string => {
@@ -13,6 +17,27 @@ const formatCurrency = (value: number): string => {
     return `₹${(value / 100000).toFixed(2)} L`
   } else {
     return `₹${value.toLocaleString('en-IN')}`
+  }
+}
+
+// Helper function to format value in crores (for dashboard cards)
+// Formats like 91659595.56 to "9.1 Cr" with smart decimal places
+const formatInCrores = (value: number): string => {
+  if (!value || value === 0 || isNaN(value)) return '0.0'
+  const crores = Number(value) / 10000000
+  
+  // If less than 1 crore, show 2 decimal places
+  if (crores < 1) {
+    return crores.toFixed(2)
+  }
+  // If less than 10 crores, show 1 decimal place (use floor to round down)
+  else if (crores < 10) {
+    const rounded = Math.floor(crores * 10) / 10
+    return rounded.toFixed(1)
+  }
+  // If 10 or more crores, show 0 decimal places
+  else {
+    return Math.floor(crores).toFixed(0)
   }
 }
 
@@ -61,18 +86,118 @@ interface Alert {
 export function Dashboard() {
   const navigate = useNavigate()
   
+  // Project filtering state
+  const [viewMode, setViewMode] = useState<'grid' | 'list' | 'compact'>('grid')
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>('all')
+  const [sortBy, setSortBy] = useState<string>('date-desc')
+  const [itemsPerPage, setItemsPerPage] = useState<number>(9)
+  const [currentPage, setCurrentPage] = useState<number>(1)
+  const [selectedClient, setSelectedClient] = useState<string>('all')
+  const [selectedManager, setSelectedManager] = useState<string>('all')
+  const [selectedLocation, setSelectedLocation] = useState<string>('all')
+  const [selectedTag, setSelectedTag] = useState<string>('all')
+  const [minValue, setMinValue] = useState<number>(0)
+  const [maxValue, setMaxValue] = useState<number>(50)
+  
   const stats = useMemo(() => {
     const projects = projectService.getAllProjects()
     const totalValue = projectService.getTotalContractValue()
     const totalProjects = projects.length
 
-    // Status counts
-    const ongoing = projects.filter(p =>
-      p.status.toLowerCase().includes('progress') ||
-      p.status.toLowerCase().includes('ongoing')
-    ).length
+    // Status counts and values - normalize raw statuses to 4 categories
+    const ongoingProjects = projects.filter(p => normalizeProjectStatus(p.status) === 'ongoing')
+    const completedProjectsList = projects.filter(p => normalizeProjectStatus(p.status) === 'completed')
+    const ongoing = ongoingProjects.length
+    const completed = completedProjectsList.length
+    const totalValueOngoing = ongoingProjects.reduce((s, p) => s + (p.contract?.valueInternal || 0), 0)
+    const totalValueCompleted = completedProjectsList.reduce((s, p) => s + (p.contract?.valueInternal || 0), 0)
 
-    return { totalValue, totalProjects, ongoing }
+    // Calculate on-time delivery percentage and value
+    // A project is "on-time" if it was completed on or before the original completion date
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+
+    // Get all projects that have an original completion date (the deadline)
+    const projectsWithOriginalDate = projects.filter(p => {
+      return p.dates.completionDateOriginal &&
+             p.dates.completionDateOriginal.trim() !== '' &&
+             p.dates.completionDateOriginal.toLowerCase() !== 'nil'
+    })
+
+    let completedProjects = 0
+    let onTimeProjects = 0
+    let delayedProjects = 0
+    let totalValueOnTime = 0
+    let totalValueDelayed = 0
+
+    projectsWithOriginalDate.forEach(p => {
+      const originalDate = parseDate(p.dates.completionDateOriginal)
+      if (!originalDate) return
+
+      const origDate = new Date(originalDate)
+      origDate.setHours(0, 0, 0, 0)
+
+      // Check if project is completed (by status or by date)
+      const status = p.status.toLowerCase()
+      const isCompletedByStatus = status.includes('complete') || status.includes('completed')
+
+      // Determine actual completion date
+      let actualCompletionDate: Date | null = null
+
+      // First, check if there's a latest completion date
+      if (p.dates.completionDateLatest) {
+        const latestDate = parseDate(p.dates.completionDateLatest)
+        if (latestDate) {
+          const latDate = new Date(latestDate)
+          latDate.setHours(0, 0, 0, 0)
+
+          // If latest date has passed or project is marked completed, use latest date
+          if (latDate <= today || isCompletedByStatus) {
+            actualCompletionDate = latDate
+          }
+        }
+      }
+
+      // If no latest date but project is marked completed, use original date as completion
+      if (!actualCompletionDate && isCompletedByStatus) {
+        if (origDate <= today) {
+          actualCompletionDate = origDate
+        }
+      }
+
+      // If we have an actual completion date, the project is completed
+      if (actualCompletionDate) {
+        completedProjects++
+
+        // Check if completed on or before original date (on-time)
+        if (actualCompletionDate <= origDate) {
+          onTimeProjects++
+          totalValueOnTime += p.contract?.valueInternal || 0
+        } else {
+          // Delayed: completed after original date
+          delayedProjects++
+          totalValueDelayed += p.contract?.valueInternal || 0
+        }
+      }
+    })
+
+    // Calculate percentage: (on-time projects / completed projects) * 100
+    const onTimeDelivery = completedProjects > 0
+      ? Math.round((onTimeProjects / completedProjects) * 100)
+      : 0
+
+    return {
+      totalValue,
+      totalValueOngoing,
+      totalValueCompleted,
+      totalValueOnTime,
+      totalValueDelayed,
+      totalProjects,
+      ongoing,
+      completed,
+      delayed: delayedProjects,
+      onTimeDelivery
+    }
   }, [])
 
   // Financial Overview Data
@@ -372,6 +497,236 @@ export function Dashboard() {
   }, [])
   void alerts // reserved for Alerts UI
 
+  // Analytics & Insights Data
+  const analyticsData = useMemo(() => {
+    const projects = projectService.getAllProjects()
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+
+    // Status breakdown for donut chart - normalize raw statuses to 4 categories
+    let ongoing = 0
+    let completed = 0
+    let delayed = 0
+    let stopped = 0
+
+    projects.forEach(p => {
+      const normalized = normalizeProjectStatus(p.status)
+      switch (normalized) {
+        case 'ongoing':
+          ongoing++
+          break
+        case 'completed':
+          completed++
+          break
+        case 'delayed':
+          delayed++
+          break
+        case 'stopped':
+          stopped++
+          break
+      }
+    })
+
+    // Monthly Progress Data
+    // Generate months from Jul 2025 to Jan 2026 (or based on actual data range)
+    const monthLabels = ['Jul 25', 'Aug 25', 'Sep 25', 'Oct 25', 'Nov 25', 'Dec 25', 'Jan 26']
+    const monthlyData: { month: string; completed: number; started: number }[] = []
+
+    monthLabels.forEach((monthLabel, index) => {
+      // Calculate month/year from label (e.g., "Jul 25" -> July 2025)
+      const year = monthLabel.includes('25') ? 2025 : 2026
+      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+      const monthName = monthLabel.split(' ')[0]
+      const monthIndex = monthNames.indexOf(monthName)
+      
+      if (monthIndex === -1) return
+
+      const monthStart = new Date(year, monthIndex, 1)
+      const monthEnd = new Date(year, monthIndex + 1, 0, 23, 59, 59, 999)
+
+      // Count projects completed in this month
+      const completedInMonth = projects.filter(p => {
+        const status = p.status.toLowerCase()
+        const isCompleted = status.includes('complete') || status.includes('completed')
+        
+        if (!isCompleted) return false
+
+        // Check completion date
+        const completionDate = parseDate(p.dates.completionDateLatest) || parseDate(p.dates.completionDateOriginal)
+        if (!completionDate) return false
+
+        const compDate = new Date(completionDate)
+        compDate.setHours(0, 0, 0, 0)
+        return compDate >= monthStart && compDate <= monthEnd
+      }).length
+
+      // Count projects started in this month
+      const startedInMonth = projects.filter(p => {
+        const startDate = parseDate(p.dates.startDate) || parseDate(p.dates.loaDate)
+        if (!startDate) return false
+
+        const sDate = new Date(startDate)
+        sDate.setHours(0, 0, 0, 0)
+        return sDate >= monthStart && sDate <= monthEnd
+      }).length
+
+      monthlyData.push({
+        month: monthLabel,
+        completed: completedInMonth,
+        started: startedInMonth
+      })
+    })
+
+    // Top 5 Projects by Value (reuse from financialData)
+    const topProjects = [...projects]
+      .sort((a, b) => b.contract.valueInternal - a.contract.valueInternal)
+      .slice(0, 5)
+      .map(p => ({
+        jan: p.jan,
+        clientName: p.clientName,
+        workName: p.workName,
+        value: p.contract.valueInternal,
+        status: p.status
+      }))
+
+    return {
+      statusData: {
+        ongoing,
+        completed,
+        delayed,
+        stopped
+      },
+      monthlyProgress: monthlyData,
+      topProjects
+    }
+  }, [])
+
+  // Get all projects for filtering
+  const allProjectsForFilter = useMemo(() => projectService.getAllProjects(), [])
+
+  // Get unique values for dropdowns
+  const uniqueClients = useMemo(() => {
+    const clients = new Set<string>()
+    allProjectsForFilter.forEach(p => {
+      if (p.clientName) clients.add(p.clientName)
+    })
+    return Array.from(clients).sort()
+  }, [allProjectsForFilter])
+
+  const uniqueManagers = useMemo(() => {
+    const managers = new Set<string>()
+    allProjectsForFilter.forEach(p => {
+      if (p.eic) managers.add(p.eic)
+    })
+    return Array.from(managers).sort()
+  }, [allProjectsForFilter])
+
+  const uniqueLocations = useMemo(() => {
+    const locations = new Set<string>()
+    allProjectsForFilter.forEach(p => {
+      const loc = `${p.location.city || ''}, ${p.location.state || ''}`.trim()
+      if (loc) locations.add(loc)
+    })
+    return Array.from(locations).sort()
+  }, [allProjectsForFilter])
+
+  // Filter projects based on all criteria
+  const filteredProjects = useMemo(() => {
+    let filtered = [...allProjectsForFilter]
+
+    // Status filter - use normalized status (ongoing, completed, delayed, stopped)
+    if (selectedStatusFilter !== 'all') {
+      filtered = filtered.filter(p => normalizeProjectStatus(p.status) === selectedStatusFilter)
+    }
+
+    // Client filter
+    if (selectedClient !== 'all') {
+      filtered = filtered.filter(p => p.clientName === selectedClient)
+    }
+
+    // Manager filter
+    if (selectedManager !== 'all') {
+      filtered = filtered.filter(p => p.eic === selectedManager)
+    }
+
+    // Location filter
+    if (selectedLocation !== 'all') {
+      filtered = filtered.filter(p => {
+        const loc = `${p.location.city || ''}, ${p.location.state || ''}`.trim()
+        return loc === selectedLocation
+      })
+    }
+
+    // Value range filter
+    filtered = filtered.filter(p => {
+      const valueInCr = (p.contract.valueInternal || 0) / 10000000
+      return valueInCr >= minValue && valueInCr <= maxValue
+    })
+
+    // Sort
+    filtered.sort((a, b) => {
+      switch (sortBy) {
+        case 'date-desc':
+          const dateA = parseDate(a.dates.loaDate || a.dates.startDate || '') || new Date(0)
+          const dateB = parseDate(b.dates.loaDate || b.dates.startDate || '') || new Date(0)
+          return dateB.getTime() - dateA.getTime()
+        case 'date-asc':
+          const dateA2 = parseDate(a.dates.loaDate || a.dates.startDate || '') || new Date(0)
+          const dateB2 = parseDate(b.dates.loaDate || b.dates.startDate || '') || new Date(0)
+          return dateA2.getTime() - dateB2.getTime()
+        case 'value-desc':
+          return (b.contract.valueInternal || 0) - (a.contract.valueInternal || 0)
+        case 'value-asc':
+          return (a.contract.valueInternal || 0) - (b.contract.valueInternal || 0)
+        case 'name-asc':
+          return (a.workName || '').localeCompare(b.workName || '')
+        case 'name-desc':
+          return (b.workName || '').localeCompare(a.workName || '')
+        default:
+          return 0
+      }
+    })
+
+    return filtered
+  }, [allProjectsForFilter, selectedStatusFilter, selectedClient, selectedManager, selectedLocation, selectedTag, minValue, maxValue, sortBy])
+
+  // Pagination
+  const totalPages = Math.ceil(filteredProjects.length / itemsPerPage)
+  const startIndex = (currentPage - 1) * itemsPerPage
+  const endIndex = startIndex + itemsPerPage
+  const paginatedProjects = filteredProjects.slice(startIndex, endIndex)
+
+  const handleClearFilters = () => {
+    setSelectedStatusFilter('all')
+    setSelectedClient('all')
+    setSelectedManager('all')
+    setSelectedLocation('all')
+    setSelectedTag('all')
+    setMinValue(0)
+    setMaxValue(50)
+    setCurrentPage(1)
+  }
+
+  const handleExportExcel = () => {
+    exportProjectsToExcel(filteredProjects)
+  }
+
+  const getStatusColor = (status: string) => {
+    const s = status.toLowerCase().trim()
+    switch (s) {
+      case 'ongoing':
+        return '#10b981' // Green
+      case 'completed':
+        return '#3b82f6' // Blue
+      case 'delayed':
+        return '#ef4444' // Red
+      case 'stopped':
+        return '#6b7280' // Gray
+      default:
+        return '#6b7280' // Gray (default)
+    }
+  }
+
   return (
     <div className="content">
       <div className="breadcrumb">
@@ -383,45 +738,252 @@ export function Dashboard() {
         <p className="page-subtitle">Overview of All {stats.totalProjects} Projects</p>
       </div>
 
-      <div className="stats-grid">
-        <div className="stat-card blue">
-          <div className="stat-header">
+      {/* Top Dashboard Cards Section */}
+      <div className="stats-grid" style={{ marginBottom: '32px' }}>
+        {/* Total Projects Card */}
+        <div 
+          className="stat-card blue"
+          role="button"
+          tabIndex={0}
+          onClick={() => navigate('/projects')}
+          onKeyDown={(e) => e.key === 'Enter' && navigate('/projects')}
+          style={{ cursor: 'pointer', display: 'flex', flexDirection: 'column' }}
+        >
+          <div className="stat-header" style={{ marginBottom: 0 }}>
             <div>
-              <div className="stat-value">₹{(stats.totalValue / 10000000).toFixed(2)}</div>
-              <div className="stat-label">Total Contract Value (Cr)</div>
-              <div className="stat-trend up">{stats.totalProjects} Active Projects</div>
+              <div className="stat-value">{stats.totalProjects}</div>
+              <div className="stat-label">Total Projects</div>
+              <div className="stat-label" style={{ marginTop: 4, fontSize: 13 }}>
+                {(() => { const v = Number(stats.totalValue) || 0; return v === 0 ? '0.00' : (v / 10000000).toFixed(2); })()} Cr total value
+              </div>
             </div>
-            <div className="stat-icon">💼</div>
+            <div className="stat-icon" style={{ background: 'rgba(59, 130, 246, 0.1)', borderRadius: '10px', width: '56px', height: '56px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              📁
+            </div>
+          </div>
+          <div style={{ marginTop: 'auto', paddingTop: '12px', display: 'flex', justifyContent: 'flex-end' }}>
+            <span className="stat-card-arrow" style={{ fontSize: '18px', color: 'var(--text-secondary)', fontWeight: 600 }}>→</span>
           </div>
         </div>
 
-        <div className="stat-card green">
-          <div className="stat-header">
+        {/* Ongoing Projects Card */}
+        <div 
+          className="stat-card green"
+          role="button"
+          tabIndex={0}
+          onClick={() => navigate('/projects?filter=ongoing')}
+          onKeyDown={(e) => e.key === 'Enter' && navigate('/projects?filter=ongoing')}
+          style={{ cursor: 'pointer', display: 'flex', flexDirection: 'column' }}
+        >
+          <div className="stat-header" style={{ marginBottom: 0 }}>
             <div>
               <div className="stat-value">{stats.ongoing}</div>
               <div className="stat-label">Ongoing Projects</div>
-              <div className="stat-trend up">
-                On Track
+              <div className="stat-label" style={{ marginTop: 4, fontSize: 13 }}>
+                {(() => { const v = Number(stats.totalValueOngoing) || 0; return v === 0 ? '0.00' : (v / 10000000).toFixed(2); })()} Cr total value
               </div>
             </div>
-            <div className="stat-icon">📈</div>
-          </div>
-        </div>
-
-        <div className="stat-card purple">
-          <div className="stat-header">
-            <div>
-              <div className="stat-value">{stats.totalProjects - stats.ongoing}</div>
-              <div className="stat-label">Pending / Other</div>
-              <div className="stat-trend">Needs Attention</div>
+            <div className="stat-icon" style={{ background: 'rgba(16, 185, 129, 0.1)', borderRadius: '10px', width: '56px', height: '56px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              🚧
             </div>
-            <div className="stat-icon">⏱️</div>
+          </div>
+          <div style={{ marginTop: 'auto', paddingTop: '12px', display: 'flex', justifyContent: 'flex-end' }}>
+            <span className="stat-card-arrow" style={{ fontSize: '18px', color: 'var(--text-secondary)', fontWeight: 600 }}>→</span>
           </div>
         </div>
 
+        {/* Completed Projects Card */}
+        <div 
+          className="stat-card purple"
+          role="button"
+          tabIndex={0}
+          onClick={() => navigate('/projects?filter=completed')}
+          onKeyDown={(e) => e.key === 'Enter' && navigate('/projects?filter=completed')}
+          style={{ cursor: 'pointer', display: 'flex', flexDirection: 'column' }}
+        >
+          <div className="stat-header" style={{ marginBottom: 0 }}>
+            <div>
+              <div className="stat-value">{stats.completed}</div>
+              <div className="stat-label">Completed Projects</div>
+              <div className="stat-label" style={{ marginTop: 4, fontSize: 13 }}>
+                {(() => { const v = Number(stats.totalValueCompleted) || 0; return v === 0 ? '0.00' : (v / 10000000).toFixed(2); })()} Cr total value
+              </div>
+            </div>
+            <div className="stat-icon" style={{ background: 'rgba(16, 185, 129, 0.1)', borderRadius: '10px', width: '56px', height: '56px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              ✅
+            </div>
+          </div>
+          <div style={{ marginTop: 'auto', paddingTop: '12px', display: 'flex', justifyContent: 'flex-end' }}>
+            <span className="stat-card-arrow" style={{ fontSize: '18px', color: 'var(--text-secondary)', fontWeight: 600 }}>→</span>
+          </div>
+        </div>
+
+        {/* Total Value Card */}
+        <div 
+          className="stat-card orange"
+          role="button"
+          tabIndex={0}
+          onClick={() => navigate('/total-value')}
+          onKeyDown={(e) => e.key === 'Enter' && navigate('/total-value')}
+          style={{ cursor: 'pointer', display: 'flex', flexDirection: 'column' }}
+        >
+          <div className="stat-header" style={{ marginBottom: 0 }}>
+            <div>
+              <div className="stat-value">
+                {(() => {
+                  const val = Number(stats.totalValue) || 0
+                  if (val === 0) return '0.00'
+                  const cr = val / 10000000
+                  return cr.toFixed(2)
+                })()} Cr
+              </div>
+              <div className="stat-label">Total projects value</div>
+            </div>
+            <div className="stat-icon" style={{ background: 'rgba(249, 115, 22, 0.1)', borderRadius: '10px', width: '56px', height: '56px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              💰
+            </div>
+          </div>
+          <div style={{ marginTop: 'auto', paddingTop: '12px', display: 'flex', justifyContent: 'flex-end' }}>
+            <span className="stat-card-arrow" style={{ fontSize: '18px', color: 'var(--text-secondary)', fontWeight: 600 }}>→</span>
+          </div>
+        </div>
+
+        {/* On-Time Delivery Card */}
+        <div 
+          className="stat-card red"
+          role="button"
+          tabIndex={0}
+          onClick={() => navigate('/projects?filter=on-time')}
+          onKeyDown={(e) => e.key === 'Enter' && navigate('/projects?filter=on-time')}
+          style={{ cursor: 'pointer', display: 'flex', flexDirection: 'column' }}
+        >
+          <div className="stat-header" style={{ marginBottom: 0 }}>
+            <div>
+              <div className="stat-value">{stats.onTimeDelivery}%</div>
+              <div className="stat-label">On-Time Delivery</div>
+              <div className="stat-label" style={{ marginTop: 4, fontSize: 13 }}>
+                {(() => { const v = Number(stats.totalValueOnTime) || 0; return v === 0 ? '0.00' : (v / 10000000).toFixed(2); })()} Cr total value
+              </div>
+            </div>
+            <div className="stat-icon" style={{ background: 'rgba(239, 68, 68, 0.1)', borderRadius: '10px', width: '56px', height: '56px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              📊
+            </div>
+          </div>
+          <div style={{ marginTop: 'auto', paddingTop: '12px', display: 'flex', justifyContent: 'flex-end' }}>
+            <span className="stat-card-arrow" style={{ fontSize: '18px', color: 'var(--text-secondary)', fontWeight: 600 }}>→</span>
+          </div>
+        </div>
+
+        {/* Delayed Projects Card */}
+        <div 
+          className="stat-card yellow"
+          role="button"
+          tabIndex={0}
+          onClick={() => navigate('/projects?filter=delayed')}
+          onKeyDown={(e) => e.key === 'Enter' && navigate('/projects?filter=delayed')}
+          style={{ cursor: 'pointer', display: 'flex', flexDirection: 'column' }}
+        >
+          <div className="stat-header" style={{ marginBottom: 0 }}>
+            <div>
+              <div className="stat-value">{stats.delayed}</div>
+              <div className="stat-label">Delayed Projects</div>
+              <div className="stat-label" style={{ marginTop: 4, fontSize: 13 }}>
+                {(() => { const v = Number(stats.totalValueDelayed) || 0; return v === 0 ? '0.00' : (v / 10000000).toFixed(2); })()} Cr total value
+              </div>
+            </div>
+            <div className="stat-icon" style={{ background: 'rgba(245, 158, 11, 0.1)', borderRadius: '10px', width: '56px', height: '56px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              ⏳
+            </div>
+          </div>
+          <div style={{ marginTop: 'auto', paddingTop: '12px', display: 'flex', justifyContent: 'flex-end' }}>
+            <span className="stat-card-arrow" style={{ fontSize: '18px', color: 'var(--text-secondary)', fontWeight: 600 }}>→</span>
+          </div>
+        </div>
       </div>
 
-      {/* Financial Overview Widgets */}
+      {/* Analytics & Insights Section */}
+      <div className="section" style={{ marginBottom: '32px' }}>
+        <div className="section-header">
+          <div className="section-title">
+            📊 Analytics & Insights
+          </div>
+        </div>
+        <div className="section-content">
+          <div style={{ 
+            display: 'grid', 
+            gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', 
+            gap: '24px',
+            marginBottom: '32px'
+          }}>
+            {/* Projects by Status - Donut Chart */}
+            <div style={{
+              padding: '24px',
+              background: 'white',
+              border: '1px solid var(--border)',
+              borderRadius: '12px',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
+            }}>
+              <h3 style={{ 
+                fontSize: '18px', 
+                fontWeight: '700', 
+                marginBottom: '20px', 
+                color: 'var(--text-primary)',
+                letterSpacing: '-0.02em'
+              }}>
+                Projects by Status
+              </h3>
+              <div style={{ minHeight: '300px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <ProjectsByStatusChart data={analyticsData.statusData} />
+              </div>
+            </div>
+
+            {/* Monthly Progress - Line Chart */}
+            <div style={{
+              padding: '24px',
+              background: 'white',
+              border: '1px solid var(--border)',
+              borderRadius: '12px',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
+            }}>
+              <h3 style={{ 
+                fontSize: '18px', 
+                fontWeight: '700', 
+                marginBottom: '20px', 
+                color: 'var(--text-primary)',
+                letterSpacing: '-0.02em'
+              }}>
+                Monthly Progress
+              </h3>
+              <div style={{ minHeight: '300px' }}>
+                <MonthlyProgressChart data={analyticsData.monthlyProgress} />
+              </div>
+            </div>
+          </div>
+
+          {/* Top 5 Projects by Value - Horizontal Bar Chart */}
+          <div style={{
+            padding: '20px',
+            background: 'white',
+            border: '1px solid var(--border)',
+            borderRadius: '8px'
+          }}>
+            <h3 style={{ 
+              fontSize: '17px', 
+              fontWeight: '600', 
+              marginBottom: '16px', 
+              color: 'var(--text-primary)'
+            }}>
+              Top 5 Projects by Value
+            </h3>
+            <div style={{ height: '280px', width: '100%' }}>
+              <TopProjectsBarChart projects={analyticsData.topProjects} />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Financial Overview Widgets - HIDDEN */}
+      {false && (
       <div className="section">
         <div className="section-header">
           <div className="section-title">
@@ -840,37 +1402,497 @@ export function Dashboard() {
           )}
         </div>
       </div>
+      )}
 
-      {/* Project Progress */}
-      <div className="section">
+      {/* Projects Filtering & Display Section */}
+      <div className="section" style={{ marginTop: '32px' }}>
         <div className="section-header">
-          <div className="section-title">
-            📊 Recent Projects
-          </div>
+          <div className="section-title">📁 Projects</div>
         </div>
-        <div className="section-content">
-          <table style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid #eee' }}>
-                <th style={{ padding: '10px' }}>JAN</th>
-                <th style={{ padding: '10px' }}>Client</th>
-                <th style={{ padding: '10px' }}>Work</th>
-                <th style={{ padding: '10px' }}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {projectService.getAllProjects().slice(0, 5).map(p => (
-                <tr key={p.jan} style={{ borderBottom: '1px solid #f9f9f9' }}>
-                  <td style={{ padding: '10px', fontWeight: 'bold' }}>{p.jan}</td>
-                  <td style={{ padding: '10px' }}>{p.clientName}</td>
-                  <td style={{ padding: '10px' }}>{p.workName.substring(0, 40)}...</td>
-                  <td style={{ padding: '10px' }}>
-                    <span className="status-badge status-ongoing">{p.status.substring(0, 20)}</span>
-                  </td>
-                </tr>
+        <div className="section-content" style={{ padding: 0 }}>
+          {/* Filter Panel */}
+          <div style={{
+            background: 'white',
+            border: '1px solid var(--border)',
+            borderRadius: '12px',
+            padding: '24px',
+            marginBottom: '24px'
+          }}>
+            {/* Top Row: View Mode & Status Filters */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '14px', fontWeight: '600', color: 'var(--text-secondary)' }}>View:</span>
+                <div style={{ display: 'flex', gap: '4px', background: 'var(--light)', padding: '4px', borderRadius: '8px' }}>
+                  <button
+                    onClick={() => setViewMode('grid')}
+                    style={{
+                      padding: '6px 12px',
+                      fontSize: '14px',
+                      border: 'none',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      background: viewMode === 'grid' ? 'var(--primary-color)' : 'transparent',
+                      color: viewMode === 'grid' ? 'white' : 'var(--text-primary)',
+                      fontWeight: viewMode === 'grid' ? '600' : '400'
+                    }}
+                  >
+                    ⬜ Grid
+                  </button>
+                  <button
+                    onClick={() => setViewMode('list')}
+                    style={{
+                      padding: '6px 12px',
+                      fontSize: '14px',
+                      border: 'none',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      background: viewMode === 'list' ? 'var(--primary-color)' : 'transparent',
+                      color: viewMode === 'list' ? 'white' : 'var(--text-primary)',
+                      fontWeight: viewMode === 'list' ? '600' : '400'
+                    }}
+                  >
+                    ☰ List
+                  </button>
+                  <button
+                    onClick={() => setViewMode('compact')}
+                    style={{
+                      padding: '6px 12px',
+                      fontSize: '14px',
+                      border: 'none',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      background: viewMode === 'compact' ? 'var(--primary-color)' : 'transparent',
+                      color: viewMode === 'compact' ? 'white' : 'var(--text-primary)',
+                      fontWeight: viewMode === 'compact' ? '600' : '400'
+                    }}
+                  >
+                    ⚬ Compact
+                  </button>
+                </div>
+                <button
+                  onClick={() => setSelectedStatusFilter('all')}
+                  style={{
+                    padding: '6px 16px',
+                    fontSize: '14px',
+                    border: '1px solid var(--border)',
+                    borderRadius: '20px',
+                    background: selectedStatusFilter === 'all' ? 'var(--primary-color)' : 'white',
+                    color: selectedStatusFilter === 'all' ? 'white' : 'var(--text-primary)',
+                    cursor: 'pointer',
+                    fontWeight: selectedStatusFilter === 'all' ? '600' : '400'
+                  }}
+                >
+                  All
+                </button>
+              </div>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <button
+                  onClick={() => exportProjectsToExcel(filteredProjects)}
+                  style={{
+                    padding: '8px 16px',
+                    fontSize: '14px',
+                    border: '1px solid var(--border)',
+                    borderRadius: '8px',
+                    background: 'white',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  📥 Export Excel
+                </button>
+              </div>
+            </div>
+
+            {/* Status Filter Pills */}
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', flexWrap: 'wrap' }}>
+              {[
+                { key: 'ongoing', label: 'Ongoing', color: '#10b981' },
+                { key: 'completed', label: 'Completed', color: '#3b82f6' },
+                { key: 'delayed', label: 'Delayed', color: '#ef4444' },
+                { key: 'stopped', label: 'Stopped', color: '#6b7280' }
+              ].map(status => (
+                <button
+                  key={status.key}
+                  onClick={() => setSelectedStatusFilter(status.key)}
+                  style={{
+                    padding: '8px 16px',
+                    fontSize: '14px',
+                    border: 'none',
+                    borderRadius: '20px',
+                    background: selectedStatusFilter === status.key ? status.color : 'var(--light)',
+                    color: selectedStatusFilter === status.key ? 'white' : 'var(--text-primary)',
+                    cursor: 'pointer',
+                    fontWeight: selectedStatusFilter === status.key ? '600' : '400',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  <span style={{
+                    width: '8px',
+                    height: '8px',
+                    borderRadius: '50%',
+                    background: selectedStatusFilter === status.key ? 'white' : status.color
+                  }} />
+                  {status.label}
+                </button>
               ))}
-            </tbody>
-          </table>
+            </div>
+
+            {/* Sort & Show Controls */}
+            <div style={{ display: 'flex', gap: '16px', marginBottom: '20px', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <label style={{ fontSize: '14px', fontWeight: '600', color: 'var(--text-secondary)' }}>Sort by:</label>
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value)}
+                  style={{
+                    padding: '8px 12px',
+                    fontSize: '14px',
+                    border: '1px solid var(--border)',
+                    borderRadius: '8px',
+                    background: 'white',
+                    cursor: 'pointer',
+                    minWidth: '180px'
+                  }}
+                >
+                  <option value="date-desc">Date (Newest First)</option>
+                  <option value="date-asc">Date (Oldest First)</option>
+                  <option value="value-desc">Value (High to Low)</option>
+                  <option value="value-asc">Value (Low to High)</option>
+                  <option value="name-asc">Name (A-Z)</option>
+                  <option value="name-desc">Name (Z-A)</option>
+                </select>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <label style={{ fontSize: '14px', fontWeight: '600', color: 'var(--text-secondary)' }}>Show:</label>
+                <select
+                  value={itemsPerPage}
+                  onChange={(e) => {
+                    setItemsPerPage(Number(e.target.value))
+                    setCurrentPage(1)
+                  }}
+                  style={{
+                    padding: '8px 12px',
+                    fontSize: '14px',
+                    border: '1px solid var(--border)',
+                    borderRadius: '8px',
+                    background: 'white',
+                    cursor: 'pointer',
+                    minWidth: '100px'
+                  }}
+                >
+                  <option value={6}>6 per page</option>
+                  <option value={9}>9 per page</option>
+                  <option value={12}>12 per page</option>
+                  <option value={18}>18 per page</option>
+                  <option value={24}>24 per page</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Filter Dropdowns */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+              <div>
+                <label style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-secondary)', marginBottom: '6px', display: 'block' }}>Client</label>
+                <select
+                  value={selectedClient}
+                  onChange={(e) => {
+                    setSelectedClient(e.target.value)
+                    setCurrentPage(1)
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    fontSize: '14px',
+                    border: '1px solid var(--border)',
+                    borderRadius: '8px',
+                    background: 'white',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <option value="all">All Clients</option>
+                  {uniqueClients.map(client => (
+                    <option key={client} value={client}>{client}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-secondary)', marginBottom: '6px', display: 'block' }}>Project Manager</label>
+                <select
+                  value={selectedManager}
+                  onChange={(e) => {
+                    setSelectedManager(e.target.value)
+                    setCurrentPage(1)
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    fontSize: '14px',
+                    border: '1px solid var(--border)',
+                    borderRadius: '8px',
+                    background: 'white',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <option value="all">All Managers</option>
+                  {uniqueManagers.map(manager => (
+                    <option key={manager} value={manager}>{manager}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-secondary)', marginBottom: '6px', display: 'block' }}>Location</label>
+                <select
+                  value={selectedLocation}
+                  onChange={(e) => {
+                    setSelectedLocation(e.target.value)
+                    setCurrentPage(1)
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    fontSize: '14px',
+                    border: '1px solid var(--border)',
+                    borderRadius: '8px',
+                    background: 'white',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <option value="all">All Locations</option>
+                  {uniqueLocations.map(location => (
+                    <option key={location} value={location}>{location}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-secondary)', marginBottom: '6px', display: 'block' }}>Tags</label>
+                <select
+                  value={selectedTag}
+                  onChange={(e) => {
+                    setSelectedTag(e.target.value)
+                    setCurrentPage(1)
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    fontSize: '14px',
+                    border: '1px solid var(--border)',
+                    borderRadius: '8px',
+                    background: 'white',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <option value="all">All Tags</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Value Range Filters */}
+            <div style={{ display: 'flex', gap: '12px', marginBottom: '20px', flexWrap: 'wrap', alignItems: 'end' }}>
+              <div>
+                <label style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-secondary)', marginBottom: '6px', display: 'block' }}>Min Value (Cr)</label>
+                <input
+                  type="number"
+                  value={minValue}
+                  onChange={(e) => {
+                    setMinValue(Number(e.target.value))
+                    setCurrentPage(1)
+                  }}
+                  style={{
+                    width: '120px',
+                    padding: '8px 12px',
+                    fontSize: '14px',
+                    border: '1px solid var(--border)',
+                    borderRadius: '8px'
+                  }}
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-secondary)', marginBottom: '6px', display: 'block' }}>Max Value (Cr)</label>
+                <input
+                  type="number"
+                  value={maxValue}
+                  onChange={(e) => {
+                    setMaxValue(Number(e.target.value))
+                    setCurrentPage(1)
+                  }}
+                  style={{
+                    width: '120px',
+                    padding: '8px 12px',
+                    fontSize: '14px',
+                    border: '1px solid var(--border)',
+                    borderRadius: '8px'
+                  }}
+                />
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  onClick={handleClearFilters}
+                  style={{
+                    padding: '8px 20px',
+                    fontSize: '14px',
+                    border: '1px solid var(--border)',
+                    borderRadius: '8px',
+                    background: 'white',
+                    cursor: 'pointer',
+                    fontWeight: '500'
+                  }}
+                >
+                  Clear All
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Project Cards Grid */}
+          {paginatedProjects.length > 0 ? (
+            <>
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: viewMode === 'grid' ? 'repeat(auto-fill, minmax(320px, 1fr))' : '1fr',
+                gap: '20px',
+                marginBottom: '24px'
+              }}>
+                {paginatedProjects.map(project => {
+                  const valueInCr = ((project.contract.valueInternal || 0) / 10000000).toFixed(2)
+                  const statusColor = getStatusColor(project.status)
+                  
+                  return (
+                    <div
+                      key={project.jan}
+                      onClick={() => navigate(`/projects/${project.jan}`)}
+                      style={{
+                        background: 'white',
+                        border: '1px solid var(--border)',
+                        borderRadius: '12px',
+                        padding: '20px',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease',
+                        position: 'relative'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = 'translateY(-4px)'
+                        e.currentTarget.style.boxShadow = '0 8px 24px rgba(0,0,0,0.12)'
+                        e.currentTarget.style.borderColor = 'var(--primary-color)'
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = 'translateY(0)'
+                        e.currentTarget.style.boxShadow = 'none'
+                        e.currentTarget.style.borderColor = 'var(--border)'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '12px' }}>
+                        <input
+                          type="checkbox"
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ cursor: 'pointer' }}
+                        />
+                        <span style={{
+                          padding: '4px 12px',
+                          fontSize: '12px',
+                          fontWeight: '600',
+                          borderRadius: '12px',
+                          background: statusColor,
+                          color: 'white'
+                        }}>
+                          {project.status.length > 20 ? project.status.substring(0, 20) + '...' : project.status}
+                        </span>
+                      </div>
+                      <h3 style={{
+                        fontSize: '16px',
+                        fontWeight: '700',
+                        color: 'var(--text-primary)',
+                        marginBottom: '8px',
+                        lineHeight: '1.4'
+                      }}>
+                        {project.workName}
+                      </h3>
+                      <div style={{
+                        fontSize: '13px',
+                        color: 'var(--text-secondary)',
+                        marginBottom: '12px',
+                        fontWeight: '500'
+                      }}>
+                        {project.clientName ? `${project.clientName} · ` : ''}JAN-{project.jan}
+                      </div>
+                      <div style={{
+                        fontSize: '14px',
+                        fontWeight: '600',
+                        color: 'var(--primary-color)'
+                      }}>
+                        ₹{valueInCr} Cr
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  gap: '8px',
+                  paddingTop: '24px',
+                  borderTop: '1px solid var(--border)'
+                }}>
+                  <button
+                    onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                    disabled={currentPage === 1}
+                    style={{
+                      padding: '8px 12px',
+                      fontSize: '14px',
+                      border: '1px solid var(--border)',
+                      borderRadius: '8px',
+                      background: 'white',
+                      cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
+                      opacity: currentPage === 1 ? 0.5 : 1
+                    }}
+                  >
+                    ‹ Prev
+                  </button>
+                  <span style={{ fontSize: '14px', color: 'var(--text-secondary)', padding: '0 12px' }}>
+                    Page {currentPage} of {totalPages}
+                  </span>
+                  <button
+                    onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                    disabled={currentPage === totalPages}
+                    style={{
+                      padding: '8px 12px',
+                      fontSize: '14px',
+                      border: '1px solid var(--border)',
+                      borderRadius: '8px',
+                      background: 'white',
+                      cursor: currentPage === totalPages ? 'not-allowed' : 'pointer',
+                      opacity: currentPage === totalPages ? 0.5 : 1
+                    }}
+                  >
+                    Next ›
+                  </button>
+                </div>
+              )}
+            </>
+          ) : (
+            <div style={{
+              textAlign: 'center',
+              padding: '60px 20px',
+              background: 'white',
+              border: '1px solid var(--border)',
+              borderRadius: '12px'
+            }}>
+              <div style={{ fontSize: '48px', marginBottom: '16px' }}>📁</div>
+              <div style={{ fontSize: '16px', fontWeight: '500', color: 'var(--text-primary)', marginBottom: '8px' }}>
+                No projects match your filters
+              </div>
+              <div style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>
+                Try adjusting your filters or clearing them to see all projects
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

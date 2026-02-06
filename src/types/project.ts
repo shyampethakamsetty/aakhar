@@ -55,6 +55,7 @@ export interface Project {
     }
     workName: string
     status: string
+    statusReason?: string
     financialYear: string
     dates: {
         tinderDate: string

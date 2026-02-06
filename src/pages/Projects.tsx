@@ -1,8 +1,17 @@
-import { useState, useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useMemo, useEffect } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { projectService } from '../data/projectData'
 import { exportProjectsToPDF } from '../utils/pdfExport'
 import type { Project } from '../types/project'
+
+// Helper function to parse date string (YYYY-MM-DD format)
+function parseDate(dateStr: string): Date | null {
+  if (!dateStr || dateStr.trim() === '' || dateStr.toLowerCase() === 'nil') {
+    return null
+  }
+  const date = new Date(dateStr)
+  return isNaN(date.getTime()) ? null : date
+}
 
 interface ClientGroup {
   name: string
@@ -11,17 +20,106 @@ interface ClientGroup {
 
 export function Projects() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const allProjects = projectService.getAllProjects()
   const [selectedClient, setSelectedClient] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedStatus, setSelectedStatus] = useState<string>('')
   const [currentPage, setCurrentPage] = useState(1)
   const [itemsPerPage, setItemsPerPage] = useState(10)
+  
+  // Get filter from URL params
+  const urlFilter = searchParams.get('filter') || 'all'
+  
+  // Apply filter based on URL parameter
+  const filteredByType = useMemo(() => {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    
+    switch (urlFilter) {
+      case 'ongoing': {
+        return allProjects.filter(p => {
+          const status = p.status.toLowerCase()
+          return status.includes('progress') || 
+                 status.includes('ongoing') ||
+                 status.includes('work in progress') ||
+                 (status.includes('work') && !status.includes('complete') && !status.includes('stop'))
+        })
+      }
+      case 'completed': {
+        return allProjects.filter(p => {
+          const status = p.status.toLowerCase()
+          const isCompletedByStatus = status.includes('complete') || status.includes('completed')
+          
+          if (p.dates.completionDateLatest) {
+            const completionDate = parseDate(p.dates.completionDateLatest)
+            if (completionDate) {
+              const compDate = new Date(completionDate)
+              compDate.setHours(0, 0, 0, 0)
+              if (compDate < today && !status.includes('ongoing') && !status.includes('progress')) {
+                return true
+              }
+            }
+          }
+          
+          return isCompletedByStatus
+        })
+      }
+      case 'on-time': {
+        return allProjects.filter(p => {
+          // Must have both dates
+          if (!p.dates.completionDateOriginal || !p.dates.completionDateLatest) return false
+          
+          const originalDate = parseDate(p.dates.completionDateOriginal)
+          const latestDate = parseDate(p.dates.completionDateLatest)
+          
+          if (!originalDate || !latestDate) return false
+          
+          const origDate = new Date(originalDate)
+          origDate.setHours(0, 0, 0, 0)
+          const latDate = new Date(latestDate)
+          latDate.setHours(0, 0, 0, 0)
+          
+          const status = p.status.toLowerCase()
+          const isCompleted = status.includes('complete') || status.includes('completed')
+          
+          // Completed and on-time (latest <= original)
+          return (isCompleted || latDate <= today) && latDate <= origDate
+        })
+      }
+      case 'delayed': {
+        return allProjects.filter(p => {
+          if (!p.dates.completionDateOriginal || !p.dates.completionDateLatest) return false
+          
+          const originalDate = parseDate(p.dates.completionDateOriginal)
+          const latestDate = parseDate(p.dates.completionDateLatest)
+          
+          if (!originalDate || !latestDate) return false
+          
+          const origDate = new Date(originalDate)
+          origDate.setHours(0, 0, 0, 0)
+          const latDate = new Date(latestDate)
+          latDate.setHours(0, 0, 0, 0)
+          
+          const status = p.status.toLowerCase()
+          const isCompleted = status.includes('complete') || status.includes('completed')
+          
+          // Completed and delayed (latest > original)
+          return (isCompleted || latDate <= today) && latDate > origDate
+        })
+      }
+      default:
+        return allProjects
+    }
+  }, [allProjects, urlFilter])
 
+  // Group projects by client (use filtered projects if filter is active)
+  const projectsToShow = urlFilter !== 'all' ? filteredByType : allProjects
+  
   // Group projects by client
   const clients = useMemo<ClientGroup[]>(() => {
     const map = new Map<string, Project[]>()
-    allProjects.forEach((p) => {
+    projectsToShow.forEach((p) => {
       const name = p.clientName || 'Unknown Client'
       if (!map.has(name)) map.set(name, [])
       map.get(name)!.push(p)
@@ -29,14 +127,15 @@ export function Projects() {
     return Array.from(map.entries())
       .map(([name, projects]) => ({ name, projects }))
       .sort((a, b) => a.name.localeCompare(b.name))
-  }, [allProjects])
+  }, [projectsToShow])
 
   const selectedClientData = selectedClient
     ? clients.find((c) => c.name === selectedClient)
     : null
 
   // When a client is selected, filter their projects
-  const clientProjects = selectedClientData?.projects ?? []
+  // If filter is active and no client selected, show filtered projects directly
+  const clientProjects = selectedClient ? (selectedClientData?.projects ?? []) : (urlFilter !== 'all' ? filteredByType : [])
   const uniqueStatuses = useMemo(() => {
     const set = new Set<string>()
     clientProjects.forEach((p) => {
@@ -46,6 +145,29 @@ export function Projects() {
   }, [clientProjects])
 
   const filteredProjects = useMemo(() => {
+    // If no client selected and filter is active, return filtered projects directly
+    if (!selectedClient && urlFilter !== 'all') {
+      return filteredByType.filter((p) => {
+        if (selectedStatus && p.status !== selectedStatus) return false
+        if (!searchQuery) return true
+        const q = searchQuery.toLowerCase()
+        const text = [
+          p.jan.toString(),
+          p.clientName || '',
+          p.workName || '',
+          p.location.city || '',
+          p.location.state || '',
+          p.status || '',
+          p.financialYear || '',
+          p.clientContact.name || '',
+          p.clientContact.email || '',
+          p.clientContact.mobile || '',
+        ].join(' ').toLowerCase()
+        return text.includes(q)
+      })
+    }
+    
+    // Otherwise, filter client projects
     return clientProjects.filter((p) => {
       if (selectedStatus && p.status !== selectedStatus) return false
       if (!searchQuery) return true
@@ -64,7 +186,32 @@ export function Projects() {
       ].join(' ').toLowerCase()
       return text.includes(q)
     })
-  }, [clientProjects, searchQuery, selectedStatus])
+  }, [clientProjects, searchQuery, selectedStatus, selectedClient, urlFilter, filteredByType])
+  
+  // Update page title based on filter
+  const getPageTitle = () => {
+    if (selectedClient) return `Projects · ${selectedClient}`
+    switch (urlFilter) {
+      case 'ongoing': return 'Ongoing Projects'
+      case 'completed': return 'Completed Projects'
+      case 'on-time': return 'On-Time Delivery Projects'
+      case 'delayed': return 'Delayed Projects'
+      default: return 'All Projects'
+    }
+  }
+  
+  const getPageSubtitle = () => {
+    if (selectedClient) {
+      return `${filteredProjects.length} project${filteredProjects.length !== 1 ? 's' : ''}`
+    }
+    switch (urlFilter) {
+      case 'ongoing': return `${filteredProjects.length} ongoing project${filteredProjects.length !== 1 ? 's' : ''}`
+      case 'completed': return `${filteredProjects.length} completed project${filteredProjects.length !== 1 ? 's' : ''}`
+      case 'on-time': return `${filteredProjects.length} on-time project${filteredProjects.length !== 1 ? 's' : ''}`
+      case 'delayed': return `${filteredProjects.length} delayed project${filteredProjects.length !== 1 ? 's' : ''}`
+      default: return `${clients.length} client${clients.length !== 1 ? 's' : ''} · ${allProjects.length} project${allProjects.length !== 1 ? 's' : ''}`
+    }
+  }
 
   const totalPages = Math.ceil(filteredProjects.length / itemsPerPage)
   const startIndex = (currentPage - 1) * itemsPerPage
@@ -73,26 +220,51 @@ export function Projects() {
 
   const goToPage = (page: number) => setCurrentPage(Math.max(1, Math.min(page, totalPages)))
   const onFilterChange = () => setCurrentPage(1)
+  
+  // Clear URL filter when needed
+  const clearFilter = () => {
+    setSearchParams({})
+    setSelectedClient(null)
+    setSearchQuery('')
+    setSelectedStatus('')
+    setCurrentPage(1)
+  }
 
   return (
     <div className="content">
-      <div className="breadcrumb">
-        <a href="#" onClick={(e) => { e.preventDefault(); navigate('/'); }}>Home</a>
+      <div className="breadcrumb" style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+        <a href="#" onClick={(e) => { e.preventDefault(); navigate('/dashboard'); }}>Home</a>
         <span> / </span>
-        <a href="#" onClick={(e) => { e.preventDefault(); setSelectedClient(null); }}>All Projects</a>
+        <a href="#" onClick={(e) => { e.preventDefault(); clearFilter(); }}>All Projects</a>
+        {urlFilter !== 'all' && <span> / {getPageTitle()}</span>}
         {selectedClient && <span> / {selectedClient}</span>}
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={() => navigate('/dashboard')}
+          style={{ marginLeft: 'auto', padding: '6px 12px', fontSize: '13px' }}
+        >
+          Go to Dashboard
+        </button>
       </div>
 
       <div className="page-header">
         <h1 className="page-title">
-          {selectedClient ? `Projects · ${selectedClient}` : 'All Projects'}
+          {getPageTitle()}
         </h1>
         <p className="page-subtitle">
-          {selectedClient
-            ? `${filteredProjects.length} project${filteredProjects.length !== 1 ? 's' : ''}`
-            : `${clients.length} client${clients.length !== 1 ? 's' : ''} · ${allProjects.length} project${allProjects.length !== 1 ? 's' : ''}`
-          }
+          {getPageSubtitle()}
         </p>
+        {urlFilter !== 'all' && (
+          <div style={{ marginTop: '8px' }}>
+            <button
+              className="btn btn-secondary"
+              onClick={clearFilter}
+            >
+              ← Back to All Projects
+            </button>
+          </div>
+        )}
         {selectedClient && (
           <div style={{ marginTop: '8px' }}>
             <button
@@ -105,7 +277,7 @@ export function Projects() {
         )}
       </div>
 
-      {!selectedClient ? (
+      {!selectedClient && urlFilter === 'all' ? (
         /* Client list: only clients, click to show their projects */
         <div className="section">
           <div className="section-header">
@@ -273,9 +445,9 @@ export function Projects() {
           </div>
         </div>
       ) : (
-        /* Selected client: show their projects */
-        selectedClientData && (
-          <>
+        /* Selected client or filtered view: show projects */
+        <>
+          {selectedClient && selectedClientData && (
             <div className="section" style={{ marginBottom: 20 }}>
               <div className="section-header" style={{ justifyContent: 'flex-start', gap: 16 }}>
                 <button
@@ -292,19 +464,20 @@ export function Projects() {
                 <div className="section-title">📁 {selectedClientData.name}</div>
               </div>
             </div>
+          )}
 
-            <div className="section">
-              <div className="section-header">
-                <div className="section-title">Project list</div>
-                <div className="section-actions">
-                  <button
-                    className="btn btn-primary"
-                    onClick={() => exportProjectsToPDF(filteredProjects)}
-                  >
-                    📥 Export
-                  </button>
-                </div>
+          <div className="section">
+            <div className="section-header">
+              <div className="section-title">Project list</div>
+              <div className="section-actions">
+                <button
+                  className="btn btn-primary"
+                  onClick={() => exportProjectsToPDF(filteredProjects)}
+                >
+                  📥 Export
+                </button>
               </div>
+            </div>
               <div className="section-content">
                 <div
                   style={{
@@ -561,7 +734,7 @@ export function Projects() {
             </div>
           </>
         )
-      )}
+      }
     </div>
   )
 }

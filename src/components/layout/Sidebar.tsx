@@ -23,7 +23,18 @@ export function Sidebar({
   return (
     <div className={`sidebar${isOpen ? ' open' : ''}`}>
       <div className="logo">
-        <div className="logo-icon">A</div>
+        <img 
+          src="/aakarlogo.jpeg" 
+          alt="AAKAR Logo" 
+          style={{
+            width: '40px',
+            height: '40px',
+            borderRadius: '10px',
+            objectFit: 'contain',
+            background: 'white',
+            padding: '4px'
+          }}
+        />
         <div className="logo-text">AAKAR</div>
       </div>
 

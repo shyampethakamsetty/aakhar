@@ -1,10 +1,17 @@
-import { useState, useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useMemo, useEffect } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { projectService } from '../data/projectData'
+import { clientService } from '../data/clientData'
 import type { Project } from '../types/project'
+import type { Client } from '../types/client'
+import { ConfirmModal } from '../components/modals/ConfirmModal'
+import { PromptModal } from '../components/modals/PromptModal'
+import { SuccessModal } from '../components/modals/SuccessModal'
 
 interface ClientInfo {
+  id?: string
   name: string
+  logo?: string
   projects: Project[]
   contactInfo: {
     name: string
@@ -18,14 +25,41 @@ interface ClientInfo {
 
 export function ClientDetails() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [selectedClient, setSelectedClient] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
+  const [refreshKey, setRefreshKey] = useState(0) // Force refresh when clients change
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [showDeletePrompt, setShowDeletePrompt] = useState(false)
+  const [showDeleteSuccess, setShowDeleteSuccess] = useState(false)
+  const [clientToDelete, setClientToDelete] = useState<{ name: string; id?: string } | null>(null)
+  const [deletedClientName, setDeletedClientName] = useState<string>('')
 
-  // Group projects by client name
+  // Merge clients from clientService and projects
   const clients = useMemo(() => {
     const projects = projectService.getAllProjects()
+    const savedClients = clientService.getAllClients()
     const clientMap = new Map<string, ClientInfo>()
 
+    // First, add all saved clients (from Add Client page)
+    savedClients.forEach((client) => {
+      clientMap.set(client.name, {
+        id: client.id,
+        name: client.name,
+        logo: client.logo,
+        projects: [],
+        contactInfo: {
+          name: client.contact.name,
+          designation: client.contact.designation,
+          mobile: client.contact.mobile,
+          email: client.contact.email,
+          emailCC: client.contact.emailCC,
+          billingAddress: client.contact.billingAddress,
+        },
+      })
+    })
+
+    // Then, add clients from projects (may override contact info if not in saved clients)
     projects.forEach((project) => {
       const clientName = project.clientName || 'Unknown Client'
       
@@ -55,7 +89,13 @@ export function ClientDetails() {
     return Array.from(clientMap.values()).sort((a, b) => 
       a.name.localeCompare(b.name)
     )
-  }, [])
+  }, [refreshKey])
+
+  // Refresh when component mounts or location changes (to catch new clients added)
+  useEffect(() => {
+    // Trigger refresh when component mounts or when navigating back from Add Client
+    setRefreshKey(Date.now())
+  }, [location.key])
 
   const filteredClients = useMemo(() => {
     if (!searchQuery.trim()) return clients
@@ -80,6 +120,51 @@ export function ClientDetails() {
     navigate(`/projects/${project.jan}`)
   }
 
+  const handleDeleteClient = (clientName: string, clientId?: string, e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation() // Prevent triggering client selection
+    }
+    
+    if (!clientId) {
+      alert('This client cannot be deleted as it is associated with existing projects.')
+      return
+    }
+    
+    setClientToDelete({ name: clientName, id: clientId })
+    setShowDeleteConfirm(true)
+  }
+
+  const handleDeleteConfirm = () => {
+    setShowDeleteConfirm(false)
+    setShowDeletePrompt(true)
+  }
+
+  const handleDeleteFinal = () => {
+    if (!clientToDelete || !clientToDelete.id) return
+    
+    const success = clientService.deleteClient(clientToDelete.id)
+    if (success) {
+      const name = clientToDelete.name
+      setDeletedClientName(name)
+      setShowDeletePrompt(false)
+      setClientToDelete(null)
+      setShowDeleteSuccess(true)
+      setRefreshKey(Date.now()) // Refresh the list
+      if (selectedClient === name) {
+        setSelectedClient(null) // Clear selection if deleted client was selected
+      }
+    } else {
+      setShowDeletePrompt(false)
+      setClientToDelete(null)
+      alert('Failed to delete client.')
+    }
+  }
+
+  const handleSuccessClose = () => {
+    setShowDeleteSuccess(false)
+    setDeletedClientName('')
+  }
+
   return (
     <div className="content">
       <div className="breadcrumb">
@@ -89,14 +174,36 @@ export function ClientDetails() {
       </div>
 
       <div className="page-header">
-        <h1 className="page-title">
-          {selectedClient ? `${selectedClient}` : 'Client &amp; Contact Information'}
-        </h1>
-        <p className="page-subtitle">
-          {selectedClient
-            ? `${selectedClientData?.projects.length ?? 0} project${(selectedClientData?.projects.length ?? 0) !== 1 ? 's' : ''}`
-            : `${clients.length} client${clients.length !== 1 ? 's' : ''} · click a client to see their projects`}
-        </p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', flexWrap: 'wrap', gap: '16px' }}>
+          <div>
+            <h1 className="page-title">
+              {selectedClient ? `${selectedClient}` : 'Client &amp; Contact Information'}
+            </h1>
+            <p className="page-subtitle">
+              {selectedClient
+                ? `${selectedClientData?.projects.length ?? 0} project${(selectedClientData?.projects.length ?? 0) !== 1 ? 's' : ''}`
+                : `${clients.length} client${clients.length !== 1 ? 's' : ''} · click a client to see their projects`}
+            </p>
+          </div>
+          {!selectedClient && (
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => navigate('/client/add')}
+              style={{
+                padding: '10px 20px',
+                fontSize: '14px',
+                fontWeight: '600',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                flexShrink: 0
+              }}
+            >
+              ➕ Add Client
+            </button>
+          )}
+        </div>
       </div>
 
       {!selectedClient ? (
@@ -175,22 +282,37 @@ export function ClientDetails() {
                   }}
                 >
                   <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '16px' }}>
-                    <div style={{
-                      width: '48px',
-                      height: '48px',
-                      borderRadius: '12px',
-                      background: 'linear-gradient(135deg, var(--primary-color), var(--secondary-color))',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: '20px',
-                      fontWeight: 'bold',
-                      color: 'white',
-                      flexShrink: 0,
-                      boxShadow: '0 2px 8px rgba(102, 126, 234, 0.2)'
-                    }}>
-                      {client.name.charAt(0).toUpperCase()}
-                    </div>
+                    {client.logo ? (
+                      <img
+                        src={client.logo}
+                        alt={client.name}
+                        style={{
+                          width: '48px',
+                          height: '48px',
+                          borderRadius: '12px',
+                          objectFit: 'cover',
+                          flexShrink: 0,
+                          boxShadow: '0 2px 8px rgba(102, 126, 234, 0.2)'
+                        }}
+                      />
+                    ) : (
+                      <div style={{
+                        width: '48px',
+                        height: '48px',
+                        borderRadius: '12px',
+                        background: 'linear-gradient(135deg, var(--primary-color), var(--secondary-color))',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '20px',
+                        fontWeight: 'bold',
+                        color: 'white',
+                        flexShrink: 0,
+                        boxShadow: '0 2px 8px rgba(102, 126, 234, 0.2)'
+                      }}>
+                        {client.name.charAt(0).toUpperCase()}
+                      </div>
+                    )}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{
                         fontSize: '16px',
@@ -247,6 +369,29 @@ export function ClientDetails() {
                     gap: '12px',
                     flexShrink: 0
                   }}>
+                    <button
+                      type="button"
+                      onClick={(e) => handleDeleteClient(client.name, client.id, e)}
+                      style={{
+                        padding: '6px 12px',
+                        fontSize: '12px',
+                        background: '#ef4444',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        fontWeight: '500',
+                        transition: 'all 0.2s ease'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = '#dc2626'
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = '#ef4444'
+                      }}
+                    >
+                      🗑️ Delete
+                    </button>
                     <div style={{
                       fontSize: '12px',
                       color: 'var(--primary-color)',
@@ -301,17 +446,47 @@ export function ClientDetails() {
         selectedClientData && (
           <>
             <div className="section" style={{ marginBottom: '20px' }}>
-              <div className="section-header" style={{ justifyContent: 'flex-start', gap: '16px' }}>
-                <button
-                  className="btn btn-secondary"
-                  onClick={() => setSelectedClient(null)}
-                  style={{ order: -1 }}
-                >
-                  ← Back to Clients
-                </button>
-                <div className="section-title">
-                  👥 {selectedClientData.name}
+              <div className="section-header" style={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => setSelectedClient(null)}
+                    style={{ order: -1 }}
+                  >
+                    ← Back to Clients
+                  </button>
+                  <div className="section-title">
+                    👥 {selectedClientData.name}
+                  </div>
                 </div>
+                {selectedClientData.id && (
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteClient(selectedClientData.name, selectedClientData.id)}
+                    style={{
+                      padding: '8px 16px',
+                      fontSize: '13px',
+                      background: '#ef4444',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontWeight: '600',
+                      transition: 'all 0.2s ease',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = '#dc2626'
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = '#ef4444'
+                    }}
+                  >
+                    🗑️ Delete Client
+                  </button>
+                )}
               </div>
               <div className="section-content">
                 {selectedClientData.contactInfo && (
@@ -444,6 +619,42 @@ export function ClientDetails() {
           </>
         )
       )}
+
+      {/* Delete Confirmation Modals */}
+      <ConfirmModal
+        isOpen={showDeleteConfirm}
+        title="Delete Client"
+        message={`Are you sure you want to delete this client?\n\nClient: ${clientToDelete?.name}\n\nThis action cannot be undone.`}
+        confirmText="Yes, Delete"
+        cancelText="Cancel"
+        onConfirm={handleDeleteConfirm}
+        onCancel={() => {
+          setShowDeleteConfirm(false)
+          setClientToDelete(null)
+        }}
+        confirmButtonColor="#ef4444"
+      />
+      <PromptModal
+        isOpen={showDeletePrompt}
+        title="Confirm Deletion"
+        message={`Please type the client name to confirm deletion:\n\nClient name: "${clientToDelete?.name}"`}
+        placeholder={`Type "${clientToDelete?.name}" to confirm`}
+        expectedValue={clientToDelete?.name || ''}
+        confirmText="Delete"
+        cancelText="Cancel"
+        onConfirm={handleDeleteFinal}
+        onCancel={() => {
+          setShowDeletePrompt(false)
+          setClientToDelete(null)
+        }}
+        confirmButtonColor="#ef4444"
+      />
+      <SuccessModal
+        isOpen={showDeleteSuccess}
+        title="Deleted"
+        message={`Client "${deletedClientName}" has been deleted successfully.`}
+        onClose={handleSuccessClose}
+      />
     </div>
   )
 }

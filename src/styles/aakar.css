@@ -279,6 +279,10 @@ body {
   box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
 }
 
+.stat-card:hover .stat-card-arrow {
+  color: var(--info-color) !important;
+}
+
 .stat-card::before {
   content: '';
   position: absolute;
